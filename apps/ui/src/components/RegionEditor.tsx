@@ -210,6 +210,25 @@ export function RegionEditor({
         {region.rect.height}
       </p>
 
+      <label className="field">
+        <span>purpose</span>
+        <select
+          value={region.purpose}
+          onChange={(e) => patch({ purpose: e.target.value as Region['purpose'] })}
+        >
+          <option value="automate">automate — runs its own actions when triggered</option>
+          <option value="landmark">landmark — a target the model can click by name</option>
+        </select>
+      </label>
+      <label className="field grow">
+        <span>description</span>
+        <input
+          placeholder="what this is, in the model's words — e.g. the fold button, bottom left"
+          value={region.description}
+          onChange={(e) => patch({ description: e.target.value })}
+        />
+      </label>
+
       <fieldset>
         <legend>condition</legend>
         <label className="field">
@@ -304,6 +323,12 @@ export function RegionEditor({
 
       <fieldset>
         <legend>actions</legend>
+        {region.purpose === 'landmark' && (
+          <p className="hint">
+            Landmarks need no actions — the model decides when to click them. Any actions below are
+            kept but ignored while this region is a landmark.
+          </p>
+        )}
         {region.actions.map((step, index) => (
           <div className="step-row" key={index}>
             <span className="step-index">{index + 1}.</span>
@@ -401,7 +426,7 @@ export function RegionEditor({
               </button>
               <button
                 onClick={() => patch({ actions: region.actions.filter((_, i) => i !== index) })}
-                disabled={region.actions.length === 1}
+                disabled={region.actions.length === 1 && region.purpose === 'automate'}
               >
                 ✕
               </button>

@@ -1,9 +1,12 @@
 import {
+  createDefaultLlmSettings,
   createDefaultSettings,
   ProfileSchema,
+  StrategySchema,
   type EngineState,
   type Profile,
   type ServerMessage,
+  type Strategy,
 } from '@autopoker/shared';
 import { describe, expect, it } from 'vitest';
 import { handleMessage, type ClientConnection, type HandlerContext } from './handlers';
@@ -21,10 +24,11 @@ function fakeClient() {
   return { client, sent };
 }
 
-function buildCtx(initialProfiles: Profile[] = []) {
+function buildCtx(initialProfiles: Profile[] = [], initialStrategies: Strategy[] = []) {
   const calls: string[] = [];
   const broadcasts: ServerMessage[] = [];
   const store = new Map(initialProfiles.map((entry) => [entry.id, entry]));
+  const strategyStore = new Map(initialStrategies.map((entry) => [entry.id, entry]));
   const state: EngineState = {
     running: false,
     dryRun: true,
@@ -60,15 +64,40 @@ function buildCtx(initialProfiles: Profile[] = []) {
       subscribe: (_client, monitorKey) => void calls.push(`subscribe:${monitorKey}`),
       unsubscribe: (_client, monitorKey) => void calls.push(`unsubscribe:${monitorKey}`),
     },
+    strategies: {
+      list: async () => [...strategyStore.values()],
+      get: async (strategyId) => strategyStore.get(strategyId),
+      save: async (strategy) => void strategyStore.set(strategy.id, strategy),
+      delete: async (strategyId) => void strategyStore.delete(strategyId),
+      addAttachment: async (strategyId, filename, mediaType, data) => {
+        calls.push(`attach:${strategyId}:${filename}:${data.byteLength}`);
+        return {
+          id: 'att1',
+          filename,
+          mediaType,
+          kind: mediaType === 'application/pdf' ? 'pdf' : 'text',
+          sizeBytes: data.byteLength,
+        };
+      },
+      deleteAttachment: async (strategyId, attachmentId) =>
+        void calls.push(`detach:${strategyId}:${attachmentId}`),
+    },
     listMonitors: async () => [],
     captureBaseline: async (monitorKey) => {
       if (monitorKey === 'ghost') throw new Error('no such monitor');
       return { baselineId: 'b1', width: 4, height: 4, pngBase64: 'cGc=' };
     },
     testActions: async (_profile, regionId) => regionId === 'r1',
+    probeLlm: async (settings) => ({
+      ok: settings.provider === 'mock',
+      provider: settings.provider,
+      message: `probed ${settings.provider}`,
+      models: [],
+    }),
+    testDecision: async (profile) => void calls.push(`testDecision:${profile.id}`),
     broadcast: (message) => broadcasts.push(message),
   };
-  return { ctx, calls, broadcasts };
+  return { ctx, calls, broadcasts, strategyStore };
 }
 
 describe('handleMessage', () => {
@@ -160,6 +189,66 @@ describe('handleMessage', () => {
       { id: 'q7', type: 'ack' },
       { id: 'q8', type: 'ack' },
     ]);
+  });
+
+  it('saveStrategy acks and broadcasts the new list', async () => {
+    const { ctx, broadcasts } = buildCtx();
+    const { client, sent } = fakeClient();
+    const strategy = StrategySchema.parse({ id: 's1', name: 'Tight', markdown: '# Fold junk' });
+    await handleMessage(ctx, client, { id: 'q1', type: 'saveStrategy', strategy });
+    expect(sent).toEqual([{ id: 'q1', type: 'ack' }]);
+    expect(broadcasts).toEqual([{ type: 'strategies', list: [strategy] }]);
+  });
+
+  it('lists and deletes strategies', async () => {
+    const strategy = StrategySchema.parse({ id: 's1', name: 'Tight' });
+    const { ctx, broadcasts } = buildCtx([], [strategy]);
+    const { client, sent } = fakeClient();
+    await handleMessage(ctx, client, { id: 'q2', type: 'listStrategies' });
+    expect(sent[0]).toEqual({ id: 'q2', type: 'strategies', list: [strategy] });
+    await handleMessage(ctx, client, { id: 'q3', type: 'deleteStrategy', strategyId: 's1' });
+    expect(sent[1]).toEqual({ id: 'q3', type: 'ack' });
+    expect(broadcasts.at(-1)).toEqual({ type: 'strategies', list: [] });
+  });
+
+  it('decodes base64 attachment uploads before storing them', async () => {
+    const { ctx, calls } = buildCtx();
+    const { client, sent } = fakeClient();
+    await handleMessage(ctx, client, {
+      id: 'q4',
+      type: 'uploadAttachment',
+      strategyId: 's1',
+      filename: 'ranges.pdf',
+      mediaType: 'application/pdf',
+      dataBase64: Buffer.from('%PDF-1.7').toString('base64'),
+    });
+    expect(calls).toContain('attach:s1:ranges.pdf:8');
+    expect(sent[0]).toMatchObject({
+      id: 'q4',
+      type: 'attachmentSaved',
+      attachment: { filename: 'ranges.pdf', kind: 'pdf', sizeBytes: 8 },
+    });
+  });
+
+  it('probes the configured provider', async () => {
+    const { ctx } = buildCtx();
+    const { client, sent } = fakeClient();
+    await handleMessage(ctx, client, {
+      id: 'q5',
+      type: 'probeLlm',
+      settings: { ...createDefaultLlmSettings(), provider: 'mock' },
+    });
+    expect(sent[0]).toMatchObject({ id: 'q5', type: 'llmProbe', result: { ok: true } });
+  });
+
+  it('testDecision runs against a known profile and rejects unknown ones', async () => {
+    const { ctx, calls } = buildCtx([profile]);
+    const { client, sent } = fakeClient();
+    await handleMessage(ctx, client, { id: 'q6', type: 'testDecision', profileId: 'p1' });
+    await handleMessage(ctx, client, { id: 'q7', type: 'testDecision', profileId: 'nope' });
+    expect(calls).toContain('testDecision:p1');
+    expect(sent[0]).toEqual({ id: 'q6', type: 'ack' });
+    expect(sent[1]).toMatchObject({ id: 'q7', type: 'error' });
   });
 
   it('testActions acks known regions and errors on unknown ones', async () => {

@@ -65,6 +65,8 @@ export class MonitoringEngine {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private tickCount = 0;
   private dryRunFlag = true;
+  /** Timestamp of the last decider consultation, used for the LLM rate limit. */
+  private lastDecisionAt = Number.NEGATIVE_INFINITY;
 
   constructor(private readonly deps: EngineDeps) {}
 
@@ -89,6 +91,7 @@ export class MonitoringEngine {
     this.profile = profile;
     this.dryRunFlag = profile.settings.dryRun;
     this.tickCount = 0;
+    this.lastDecisionAt = Number.NEGATIVE_INFINITY;
     this.runtimes.clear();
     for (const region of profile.regions) {
       this.runtimes.set(region.id, {
@@ -174,13 +177,26 @@ export class MonitoringEngine {
         });
       }
 
-      if (!this.dryRunFlag && evaluations.some((evaluation) => evaluation.triggered)) {
-        for (const request of this.deps.decider.decide({ tick: this.tickCount, evaluations })) {
-          if (!this.deps.queue.enqueue(request)) {
-            this.deps.events?.onLog?.(
-              'warn',
-              `action queue busy, dropped trigger for "${request.regionName}"`,
-            );
+      if (this.shouldDecide(profile, evaluations, now)) {
+        this.lastDecisionAt = now;
+        // Awaited: the decider may call a model, and awaiting inside the tick is what
+        // guarantees only one model call is ever in flight.
+        const requests = await this.deps.decider.decide({
+          tick: this.tickCount,
+          now,
+          evaluations,
+          frames,
+        });
+        // The decider still runs in dry-run so the UI can show what would have happened;
+        // only the enqueue is suppressed.
+        if (!this.dryRunFlag) {
+          for (const request of requests) {
+            if (!this.deps.queue.enqueue(request)) {
+              this.deps.events?.onLog?.(
+                'warn',
+                `action queue busy, dropped trigger for "${request.regionName}"`,
+              );
+            }
           }
         }
       }
@@ -190,6 +206,18 @@ export class MonitoringEngine {
     } finally {
       this.scheduleNext(profile.settings.intervalMs);
     }
+  }
+
+  /**
+   * Manual mode consults the decider whenever a region fires. LLM mode adds a rate
+   * limit — the main cost control — and can optionally poll on every tick instead of
+   * waiting for a region to fire.
+   */
+  private shouldDecide(profile: Profile, evaluations: RegionEvaluation[], now: number): boolean {
+    const anyTriggered = evaluations.some((evaluation) => evaluation.triggered);
+    if (profile.settings.mode === 'manual') return anyTriggered;
+    if (now - this.lastDecisionAt < profile.settings.llm.minIntervalMs) return false;
+    return profile.settings.llmTrigger === 'everyTick' || anyTriggered;
   }
 
   private async captureFrames(regions: Region[]): Promise<Map<string, Frame>> {

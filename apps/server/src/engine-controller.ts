@@ -1,36 +1,64 @@
 import {
   ActionQueue,
+  LlmDecider,
   MonitoringEngine,
   RegionRuleDecider,
   ScaledCoordinateMapper,
   StepActionExecutor,
   type ActionRequest,
   type BaselineStore,
+  type Decider,
   type InputController,
   type ScreenCapturer,
+  type StrategyStore,
 } from '@autopoker/core';
 import { startKillSwitch, type KillSwitchHandle } from '@autopoker/core/adapters';
+import {
+  AiSdkDecisionSource,
+  MockDecisionSource,
+  type DecisionSource,
+  type StrategyContext,
+} from '@autopoker/llm';
 import { rectCenter, type EngineState, type Profile, type ServerMessage } from '@autopoker/shared';
 import type { EngineControl } from './handlers';
 
 const CORNER_TOLERANCE_PX = 5;
 
+type StrategyContextValue = StrategyContext | null;
+
 /**
  * Owns the MonitoringEngine plus its live wiring: kill switch lifecycle, corner-guarded
  * step execution, region status change detection, and event broadcasting.
  */
+/** Sends mock-provider requests to the scripted source and everything else to a real model. */
+class RoutingDecisionSource implements DecisionSource {
+  private readonly mock = new MockDecisionSource();
+  private readonly real = new AiSdkDecisionSource();
+
+  decide(request: Parameters<DecisionSource['decide']>[0]) {
+    return request.settings.provider === 'mock'
+      ? this.mock.decide(request)
+      : this.real.decide(request);
+  }
+}
+
 export class EngineController implements EngineControl {
   private readonly engine: MonitoringEngine;
   private readonly queue: ActionQueue;
+  private readonly ruleDecider: Decider;
+  private readonly llmDecider: Decider;
   private killSwitch: KillSwitchHandle | null = null;
   private killFlag = false;
   private mapper = new ScaledCoordinateMapper([]);
   private readonly lastStatus = new Map<string, string>();
+  /** Strategy files are read once per run, not once per tick. */
+  private contextCache: { strategyId: string; context: StrategyContextValue } | null = null;
 
   constructor(
     private readonly capturer: ScreenCapturer,
     private readonly input: InputController,
     baselines: BaselineStore,
+    private readonly strategies: StrategyStore,
     private readonly broadcast: (message: ServerMessage) => void,
   ) {
     const executor = new StepActionExecutor(input, { guard: () => this.stepAllowed() });
@@ -38,11 +66,30 @@ export class EngineController implements EngineControl {
       onError: (request, error) =>
         this.log('error', `actions failed for "${request.regionName}": ${String(error)}`),
     });
+    const mapper = {
+      toScreen: (key: string, point: { x: number; y: number }) => this.mapper.toScreen(key, point),
+    };
+    this.ruleDecider = new RegionRuleDecider(mapper);
+    this.llmDecider = new LlmDecider({
+      source: new RoutingDecisionSource(),
+      capturer,
+      mapper,
+      getProfile: () => this.engine.activeProfile,
+      loadContext: () => this.loadStrategyContext(),
+      isDryRun: () => this.engine.dryRun,
+      onDecision: (record) => this.broadcast({ type: 'llmDecision', record }),
+      onLog: (level, message) => this.log(level, message),
+    });
     this.engine = new MonitoringEngine({
       capturer,
-      decider: new RegionRuleDecider({
-        toScreen: (key, point) => this.mapper.toScreen(key, point),
-      }),
+      // Routed per tick so switching a profile between manual and llm mode takes
+      // effect without rebuilding the engine.
+      decider: {
+        decide: (input) =>
+          this.engine.activeProfile?.settings.mode === 'llm'
+            ? this.llmDecider.decide(input)
+            : this.ruleDecider.decide(input),
+      },
       queue: this.queue,
       baselines,
       input,
@@ -78,8 +125,27 @@ export class EngineController implements EngineControl {
     await this.baselineStore.loadAll(baselineIds);
   }
 
+  /** Read the active profile's strategy once per run and reuse it for every tick. */
+  private async loadStrategyContext(): Promise<StrategyContextValue> {
+    const strategyId = this.engine.activeProfile?.settings.strategyId;
+    if (!strategyId) return null;
+    if (this.contextCache?.strategyId === strategyId) return this.contextCache.context;
+    const context = await this.strategies.loadContext(strategyId);
+    if (!context) this.log('warn', `strategy "${strategyId}" was not found on disk`);
+    this.contextCache = { strategyId, context };
+    return context;
+  }
+
   async start(profile: Profile): Promise<void> {
+    this.contextCache = null;
     await this.prepare(profile);
+    if (profile.settings.mode === 'llm') {
+      const { provider, model } = profile.settings.llm;
+      this.log('info', `llm mode: ${provider} / ${model}, trigger=${profile.settings.llmTrigger}`);
+      if (!profile.settings.strategyId) {
+        this.log('warn', 'llm mode with no strategy selected — the model has no instructions');
+      }
+    }
     this.killFlag = false;
     this.lastStatus.clear();
     this.armKillSwitch(profile.settings.killSwitchHotkey);
@@ -129,6 +195,27 @@ export class EngineController implements EngineControl {
       return true;
     }
     return this.queue.enqueue(request);
+  }
+
+  /**
+   * Run exactly one model decision against a live screenshot and report it, without
+   * executing anything. This is the tuning loop for strategies.
+   */
+  async testDecision(profile: Profile): Promise<void> {
+    this.contextCache = null;
+    await this.prepare(profile);
+    const probe = new LlmDecider({
+      source: new RoutingDecisionSource(),
+      capturer: this.capturer,
+      mapper: { toScreen: (key, point) => this.mapper.toScreen(key, point) },
+      getProfile: () => profile,
+      loadContext: () => this.strategies.loadContext(profile.settings.strategyId ?? ''),
+      // A one-shot probe never acts, whatever the engine's live dry-run setting is.
+      isDryRun: () => true,
+      onDecision: (record) => this.broadcast({ type: 'llmDecision', record }),
+      onLog: (level, message) => this.log(level, message),
+    });
+    await probe.decide({ tick: 0, now: Date.now(), evaluations: [], frames: new Map() });
   }
 
   private stepAllowed(): boolean {

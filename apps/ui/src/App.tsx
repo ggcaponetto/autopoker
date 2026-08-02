@@ -3,21 +3,31 @@ import {
   createDefaultSettings,
   ProfileSchema,
   RegionSchema,
+  StrategySchema,
+  type EngineSettings,
+  type LlmSettings,
   type Profile,
   type Rect,
   type Region,
+  type Strategy,
 } from '@autopoker/shared';
 import { EngineControls } from './components/EngineControls';
 import { EventLog } from './components/EventLog';
+import { ModelPanel } from './components/ModelPanel';
 import { MonitorPreview } from './components/MonitorPreview';
 import { RegionEditor } from './components/RegionEditor';
 import { RegionList } from './components/RegionList';
+import { StrategyPanel } from './components/StrategyPanel';
 import { useServer } from './ws/useServer';
+
+type Tab = 'regions' | 'strategy' | 'model';
 
 export function App() {
   const { state, send, subscribe } = useServer();
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Region | null>(null);
+  const [tab, setTab] = useState<Tab>('regions');
+  const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
 
   const profile = useMemo(
     () =>
@@ -70,6 +80,44 @@ export function App() {
     });
     saveProfile(created);
     setSelectedProfileId(created.id);
+  };
+
+  const patchSettings = (partial: Partial<EngineSettings>) => {
+    if (!profile) return;
+    saveProfile({ ...profile, settings: { ...profile.settings, ...partial } });
+  };
+
+  const patchLlm = (partial: Partial<LlmSettings>) => {
+    if (!profile) return;
+    patchSettings({ llm: { ...profile.settings.llm, ...partial } });
+  };
+
+  const strategy =
+    state.strategies.find((candidate) => candidate.id === selectedStrategyId) ??
+    state.strategies.find((candidate) => candidate.id === profile?.settings.strategyId) ??
+    state.strategies[0] ??
+    null;
+
+  const createStrategy = (name: string) => {
+    const created = StrategySchema.parse({ id: crypto.randomUUID(), name });
+    send({ type: 'saveStrategy', strategy: created });
+    setSelectedStrategyId(created.id);
+  };
+
+  const uploadAttachment = (strategyId: string, file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== 'string') return;
+      send({
+        type: 'uploadAttachment',
+        strategyId,
+        filename: file.name,
+        mediaType: file.type || 'text/plain',
+        dataBase64: result.slice(result.indexOf(',') + 1),
+      });
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleCreateRect = (monitorKey: string, rect: Rect) => {
@@ -140,20 +188,76 @@ export function App() {
           ))}
         </div>
         <aside className="sidebar">
-          <section>
-            <h2>regions {profile ? `— ${profile.name}` : ''}</h2>
-            <RegionList
-              regions={profile?.regions ?? []}
-              selectedRegionId={draft?.id ?? null}
-              regionStatus={state.regionStatus}
-              onSelect={(regionId) => {
-                const region = profile?.regions.find((candidate) => candidate.id === regionId);
-                if (region) setDraft(structuredClone(region));
-              }}
-              onToggleEnabled={(region) => upsertRegion({ ...region, enabled: !region.enabled })}
-            />
-          </section>
-          {draft && (
+          <nav className="tabs">
+            {(['regions', 'strategy', 'model'] as Tab[]).map((name) => (
+              <button
+                key={name}
+                className={tab === name ? 'primary' : ''}
+                onClick={() => setTab(name)}
+              >
+                {name}
+                {name === 'model' && profile?.settings.mode === 'llm' ? ' ●' : ''}
+              </button>
+            ))}
+          </nav>
+
+          {tab === 'strategy' && (
+            <section>
+              <h2>strategy</h2>
+              <StrategyPanel
+                strategies={state.strategies}
+                selectedId={strategy?.id ?? null}
+                onSelect={setSelectedStrategyId}
+                onCreate={createStrategy}
+                onSave={(updated: Strategy) => send({ type: 'saveStrategy', strategy: updated })}
+                onDelete={(strategyId) => {
+                  send({ type: 'deleteStrategy', strategyId });
+                  setSelectedStrategyId(null);
+                }}
+                onUpload={uploadAttachment}
+                onDeleteAttachment={(strategyId, attachmentId) =>
+                  send({ type: 'deleteAttachment', strategyId, attachmentId })
+                }
+              />
+            </section>
+          )}
+
+          {tab === 'model' && (
+            <section>
+              <h2>model {profile ? `— ${profile.name}` : ''}</h2>
+              {profile ? (
+                <ModelPanel
+                  settings={profile.settings}
+                  strategies={state.strategies}
+                  probe={state.llmProbe}
+                  lastDecision={state.decisions.at(-1) ?? null}
+                  onPatch={patchSettings}
+                  onPatchLlm={patchLlm}
+                  onProbe={() => send({ type: 'probeLlm', settings: profile.settings.llm })}
+                  onTestDecision={() => send({ type: 'testDecision', profileId: profile.id })}
+                />
+              ) : (
+                <p className="hint">Create a profile first.</p>
+              )}
+            </section>
+          )}
+
+          {tab === 'regions' && (
+            <section>
+              <h2>regions {profile ? `— ${profile.name}` : ''}</h2>
+              <RegionList
+                regions={profile?.regions ?? []}
+                selectedRegionId={draft?.id ?? null}
+                regionStatus={state.regionStatus}
+                onSelect={(regionId) => {
+                  const region = profile?.regions.find((candidate) => candidate.id === regionId);
+                  if (region) setDraft(structuredClone(region));
+                }}
+                onToggleEnabled={(region) => upsertRegion({ ...region, enabled: !region.enabled })}
+              />
+            </section>
+          )}
+          {tab === 'regions' && draft && (
             <section>
               <h2>region editor</h2>
               <RegionEditor

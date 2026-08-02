@@ -1,16 +1,25 @@
 import path from 'node:path';
-import { BaselineStore, cropRgba, ProfileStore } from '@autopoker/core';
+import { BaselineStore, cropRgba, ProfileStore, StrategyStore } from '@autopoker/core';
 import { NodeScreenshotsCapturer, RobotInputController } from '@autopoker/core/adapters';
+import { probeLlm } from '@autopoker/llm';
 import type { ServerMessage } from '@autopoker/shared';
 import { EngineController } from './engine-controller';
 import { handleMessage, type HandlerContext } from './handlers';
 import { PreviewPublisher } from './preview';
 import { safeDecode, startWsServer, type WsServerHandle } from './ws-server';
 
-const SERVER_VERSION = '0.1.0';
+const SERVER_VERSION = '0.2.0';
 const port = Number(process.env.PORT ?? 8787);
-const dataDir =
-  process.env.AUTOPOKER_DATA_DIR ?? path.resolve(import.meta.dirname, '../../../data');
+const repoRoot = path.resolve(import.meta.dirname, '../../..');
+const dataDir = process.env.AUTOPOKER_DATA_DIR ?? path.join(repoRoot, 'data');
+
+// Load API keys from a gitignored .env at the repo root, if the user made one.
+try {
+  process.loadEnvFile(path.join(repoRoot, '.env'));
+  console.log('loaded .env');
+} catch {
+  // No .env is the normal case; keys can also come from the real environment.
+}
 
 let wsHandle: WsServerHandle | null = null;
 const broadcast = (message: ServerMessage) => wsHandle?.broadcast(message);
@@ -19,7 +28,8 @@ const capturer = new NodeScreenshotsCapturer();
 const input = new RobotInputController();
 const baselines = new BaselineStore(path.join(dataDir, 'baselines'));
 const profiles = new ProfileStore(path.join(dataDir, 'profiles'));
-const controller = new EngineController(capturer, input, baselines, broadcast);
+const strategies = new StrategyStore(path.join(dataDir, 'strategies'));
+const controller = new EngineController(capturer, input, baselines, strategies, broadcast);
 const preview = new PreviewPublisher(capturer, (message) =>
   broadcast({ type: 'log', level: 'warn', message, at: Date.now() }),
 );
@@ -27,6 +37,7 @@ const preview = new PreviewPublisher(capturer, (message) =>
 const ctx: HandlerContext = {
   engine: controller,
   profiles,
+  strategies,
   preview,
   listMonitors: () => capturer.listMonitors(),
   captureBaseline: async (monitorKey, rect) => {
@@ -43,6 +54,8 @@ const ctx: HandlerContext = {
     };
   },
   testActions: (profile, regionId) => controller.testActions(profile, regionId),
+  probeLlm: (settings) => probeLlm(settings),
+  testDecision: (profile) => controller.testDecision(profile),
   broadcast,
 };
 

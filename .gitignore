@@ -2,6 +2,7 @@ node_modules/
 dist/
 coverage/
 data/
+.env
 *.tsbuildinfo
 .eslintcache
 *.log

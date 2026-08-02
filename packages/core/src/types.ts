@@ -70,12 +70,22 @@ export interface RegionEvaluation {
   triggered: boolean;
 }
 
+export interface DeciderInput {
+  tick: number;
+  now: number;
+  evaluations: RegionEvaluation[];
+  /** Full monitor frames captured this tick, keyed by monitor. */
+  frames: Map<string, Frame>;
+}
+
 /**
- * Turns a tick's evaluations into action requests. The MVP ships a rule-based
- * implementation; an LLM-backed decider can implement this same interface later.
+ * Turns a tick's evaluations into action requests. The rule-based decider reads only
+ * the evaluations; the LLM decider also looks at the frames. Async so a model call
+ * can be awaited inside the tick — the engine never overlaps ticks, so awaiting here
+ * is what keeps concurrent model calls from happening.
  */
 export interface Decider {
-  decide(input: { tick: number; evaluations: RegionEvaluation[] }): ActionRequest[];
+  decide(input: DeciderInput): ActionRequest[] | Promise<ActionRequest[]>;
 }
 
 export interface BaselineProvider {

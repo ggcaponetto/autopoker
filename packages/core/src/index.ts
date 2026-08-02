@@ -5,6 +5,8 @@ export * from './baselines';
 export * from './action-queue';
 export * from './executor';
 export * from './decider';
+export * from './llm-decider';
 export * from './mapper';
 export * from './engine';
 export * from './config-store';
+export * from './strategy-store';

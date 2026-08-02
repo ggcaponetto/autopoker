@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@autopoker/llm": "0.0.0",
     "@autopoker/shared": "0.0.0",
     "@hurdlegroup/robotjs": "^0.12.3",
     "node-screenshots": "^0.2.8",

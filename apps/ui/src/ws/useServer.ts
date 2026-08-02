@@ -4,15 +4,18 @@ import {
   encodeMessage,
   type ClientMessage,
   type EngineState,
+  type LlmDecisionRecord,
+  type LlmProbeResult,
   type MonitorInfo,
   type Profile,
   type RegionRunState,
   type ServerMessage,
+  type Strategy,
 } from '@autopoker/shared';
 
 export interface UiEvent {
   at: number;
-  kind: 'triggered' | 'log' | 'killSwitch' | 'error';
+  kind: 'triggered' | 'log' | 'killSwitch' | 'error' | 'decision';
   level: 'info' | 'warn' | 'error';
   text: string;
 }
@@ -42,10 +45,13 @@ export interface ServerConnectionState {
   serverVersion: string | null;
   monitors: MonitorInfo[];
   profiles: Profile[];
+  strategies: Strategy[];
   engineState: EngineState;
   frames: Record<string, FrameInfo>;
   regionStatus: Record<string, RegionStatusInfo>;
   lastBaseline: BaselineInfo | null;
+  llmProbe: LlmProbeResult | null;
+  decisions: LlmDecisionRecord[];
   events: UiEvent[];
 }
 
@@ -54,6 +60,7 @@ const initialState: ServerConnectionState = {
   serverVersion: null,
   monitors: [],
   profiles: [],
+  strategies: [],
   engineState: {
     running: false,
     dryRun: true,
@@ -64,6 +71,8 @@ const initialState: ServerConnectionState = {
   frames: {},
   regionStatus: {},
   lastBaseline: null,
+  llmProbe: null,
+  decisions: [],
   events: [],
 };
 
@@ -93,6 +102,37 @@ function reducer(state: ServerConnectionState, action: InternalAction): ServerCo
           return { ...state, monitors: message.list };
         case 'profiles':
           return { ...state, profiles: message.list };
+        case 'strategies':
+          return { ...state, strategies: message.list };
+        case 'attachmentSaved':
+          return state; // the follow-up `strategies` broadcast carries the new list
+        case 'llmProbe':
+          return {
+            ...state,
+            llmProbe: message.result,
+            events: pushEvent(state.events, {
+              at: Date.now(),
+              kind: 'log',
+              level: message.result.ok ? 'info' : 'warn',
+              text: message.result.message,
+            }),
+          };
+        case 'llmDecision': {
+          const { record } = message;
+          const verdict = record.executed
+            ? `executed ${record.steps.length} step${record.steps.length === 1 ? '' : 's'}`
+            : `skipped (${record.skippedReason ?? 'no reason given'})`;
+          return {
+            ...state,
+            decisions: [...state.decisions.slice(-49), record],
+            events: pushEvent(state.events, {
+              at: record.at,
+              kind: 'decision',
+              level: record.executed ? 'info' : 'warn',
+              text: `${record.model} (${(record.decision.confidence * 100).toFixed(0)}%, ${record.latencyMs}ms): ${record.decision.observation} — ${verdict}`,
+            }),
+          };
+        }
         case 'engineState':
           return { ...state, engineState: message.state };
         case 'previewFrame':

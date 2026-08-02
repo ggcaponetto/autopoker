@@ -90,11 +90,13 @@ describe('ProfileSchema', () => {
       regions: [minimalRegion],
       settings: {},
     });
-    expect(profile.settings).toEqual({
+    expect(profile.settings).toMatchObject({
+      mode: 'manual',
       intervalMs: 500,
       dryRun: true,
       killSwitchHotkey: 'Escape',
       cornerFailsafe: true,
+      strategyId: null,
     });
     expect(profile.regions).toHaveLength(1);
   });

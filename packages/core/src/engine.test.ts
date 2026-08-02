@@ -193,6 +193,37 @@ describe('MonitoringEngine', () => {
     expect(harness.engine.running).toBe(true);
   });
 
+  it('consults the decider in dry-run but never enqueues its requests', async () => {
+    const profile = profileOf([redDetector()], { dryRun: true });
+    const calls: number[] = [];
+    const capturer = new FakeCapturer({ [MONITOR]: [redFrame] });
+    const executor = new RecordingExecutor();
+    const engine = new MonitoringEngine({
+      capturer,
+      decider: {
+        decide: (deciderInput) => {
+          calls.push(deciderInput.tick);
+          return [
+            {
+              regionId: 'r1',
+              regionName: 'Red detector',
+              steps: [{ type: 'delay', ms: 1 }],
+              regionCenter: { x: 0, y: 0 },
+            },
+          ];
+        },
+      },
+      queue: new ActionQueue(executor),
+      baselines: { get: () => undefined },
+      input: new RecordingInput(),
+    });
+    engine.start(profile);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toHaveLength(1);
+    expect(executor.requests).toHaveLength(0);
+    engine.stop();
+  });
+
   it('skips disabled regions', async () => {
     const profile = profileOf([redDetector({ enabled: false })], { dryRun: true });
     const harness = buildEngine([redFrame], profile);

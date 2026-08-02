@@ -402,3 +402,137 @@ input[type='color'] {
 .event.kind-triggered {
   color: #6fe08b;
 }
+
+.event.kind-decision {
+  color: #7cc4ff;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.tabs button {
+  flex: 1;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.panel fieldset {
+  border: 1px solid #2c313a;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.panel legend {
+  color: #8b93a1;
+  font-size: 12px;
+  padding: 0 4px;
+}
+
+.mode-switch button {
+  flex: 1;
+}
+
+.field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field-block span {
+  color: #8b93a1;
+  font-size: 12px;
+}
+
+.markdown-editor {
+  min-height: 220px;
+  resize: vertical;
+  background: #14161a;
+  color: #d8dce2;
+  border: 1px solid #3a4150;
+  border-radius: 4px;
+  padding: 8px;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.attachment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.attachment-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.attachment-list .grow {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pill.kind-image {
+  color: #7cc4ff;
+}
+
+.pill.kind-pdf {
+  color: #e0b64c;
+}
+
+.pill.kind-text {
+  color: #6fe08b;
+}
+
+.decision-card {
+  border: 1px solid #2c6ca3;
+  border-radius: 4px;
+  padding: 8px;
+  background: #1a2029;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.decision-card p {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.decision-actions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.decision-actions code {
+  font-size: 12px;
+  color: #6fe08b;
+}
+
+input[type='file'] {
+  font-size: 12px;
+  padding: 2px;
+}

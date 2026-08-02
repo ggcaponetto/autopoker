@@ -1,6 +1,14 @@
 import { z } from 'zod';
-import { ActionStepSchema, ProfileSchema } from './config';
+import { ActionStepSchema } from './actions';
+import { ProfileSchema } from './config';
 import { RectSchema } from './geometry';
+import {
+  LlmDecisionRecordSchema,
+  LlmProbeResultSchema,
+  LlmSettingsSchema,
+  StrategyAttachmentSchema,
+  StrategySchema,
+} from './llm';
 
 const id = z.string().optional();
 
@@ -54,6 +62,27 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
     profileId: z.string().min(1),
     regionId: z.string().min(1),
   }),
+  z.object({ id, type: z.literal('listStrategies') }),
+  z.object({ id, type: z.literal('saveStrategy'), strategy: StrategySchema }),
+  z.object({ id, type: z.literal('deleteStrategy'), strategyId: z.string().min(1) }),
+  z.object({
+    id,
+    type: z.literal('uploadAttachment'),
+    strategyId: z.string().min(1),
+    filename: z.string().min(1),
+    mediaType: z.string().min(1),
+    /** Base64-encoded file contents; the server caps the decoded size. */
+    dataBase64: z.string(),
+  }),
+  z.object({
+    id,
+    type: z.literal('deleteAttachment'),
+    strategyId: z.string().min(1),
+    attachmentId: z.string().min(1),
+  }),
+  z.object({ id, type: z.literal('probeLlm'), settings: LlmSettingsSchema }),
+  /** Run one LLM decision now against a live screenshot, without executing it. */
+  z.object({ id, type: z.literal('testDecision'), profileId: z.string().min(1) }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 
@@ -98,6 +127,15 @@ export const ServerMessageSchema = z.discriminatedUnion('type', [
     dryRun: z.boolean(),
     steps: z.array(ActionStepSchema),
   }),
+  z.object({ id, type: z.literal('strategies'), list: z.array(StrategySchema) }),
+  z.object({
+    id,
+    type: z.literal('attachmentSaved'),
+    strategyId: z.string(),
+    attachment: StrategyAttachmentSchema,
+  }),
+  z.object({ id, type: z.literal('llmProbe'), result: LlmProbeResultSchema }),
+  z.object({ id, type: z.literal('llmDecision'), record: LlmDecisionRecordSchema }),
   z.object({ type: z.literal('killSwitch'), reason: z.enum(['hotkey', 'corner']) }),
   z.object({
     type: z.literal('log'),

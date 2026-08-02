@@ -1,10 +1,14 @@
 import type {
   ClientMessage,
   EngineState,
+  LlmProbeResult,
+  LlmSettings,
   MonitorInfo,
   Profile,
   Rect,
   ServerMessage,
+  Strategy,
+  StrategyAttachment,
 } from '@autopoker/shared';
 
 export interface ClientConnection {
@@ -37,14 +41,32 @@ export interface PreviewControl {
   unsubscribe(client: ClientConnection, monitorKey: string): void;
 }
 
+export interface StrategyStoreLike {
+  list(): Promise<Strategy[]>;
+  get(strategyId: string): Promise<Strategy | undefined>;
+  save(strategy: Strategy): Promise<void>;
+  delete(strategyId: string): Promise<void>;
+  addAttachment(
+    strategyId: string,
+    filename: string,
+    mediaType: string,
+    data: Uint8Array,
+  ): Promise<StrategyAttachment>;
+  deleteAttachment(strategyId: string, attachmentId: string): Promise<void>;
+}
+
 export interface HandlerContext {
   engine: EngineControl;
   profiles: ProfileStoreLike;
+  strategies: StrategyStoreLike;
   preview: PreviewControl;
   listMonitors(): Promise<MonitorInfo[]>;
   captureBaseline(monitorKey: string, rect: Rect): Promise<BaselineCapturedResult>;
   /** Run one region's actions once (respecting dry-run). False when the region is unknown. */
   testActions(profile: Profile, regionId: string): Promise<boolean>;
+  probeLlm(settings: LlmSettings): Promise<LlmProbeResult>;
+  /** Ask the model once and broadcast the decision without executing it. */
+  testDecision(profile: Profile): Promise<void>;
   broadcast(message: ServerMessage): void;
 }
 
@@ -112,6 +134,49 @@ export async function handleMessage(
         if (ran) client.send({ id, type: 'ack' });
         else
           client.send({ id, type: 'error', message: 'region or profile not found, or queue busy' });
+        break;
+      }
+      case 'listStrategies':
+        client.send({ id, type: 'strategies', list: await ctx.strategies.list() });
+        break;
+      case 'saveStrategy':
+        await ctx.strategies.save(message.strategy);
+        client.send({ id, type: 'ack' });
+        ctx.broadcast({ type: 'strategies', list: await ctx.strategies.list() });
+        break;
+      case 'deleteStrategy':
+        await ctx.strategies.delete(message.strategyId);
+        client.send({ id, type: 'ack' });
+        ctx.broadcast({ type: 'strategies', list: await ctx.strategies.list() });
+        break;
+      case 'uploadAttachment': {
+        const data = new Uint8Array(Buffer.from(message.dataBase64, 'base64'));
+        const attachment = await ctx.strategies.addAttachment(
+          message.strategyId,
+          message.filename,
+          message.mediaType,
+          data,
+        );
+        client.send({ id, type: 'attachmentSaved', strategyId: message.strategyId, attachment });
+        ctx.broadcast({ type: 'strategies', list: await ctx.strategies.list() });
+        break;
+      }
+      case 'deleteAttachment':
+        await ctx.strategies.deleteAttachment(message.strategyId, message.attachmentId);
+        client.send({ id, type: 'ack' });
+        ctx.broadcast({ type: 'strategies', list: await ctx.strategies.list() });
+        break;
+      case 'probeLlm':
+        client.send({ id, type: 'llmProbe', result: await ctx.probeLlm(message.settings) });
+        break;
+      case 'testDecision': {
+        const profile = await ctx.profiles.get(message.profileId);
+        if (!profile) {
+          client.send({ id, type: 'error', message: `profile not found: ${message.profileId}` });
+          return;
+        }
+        await ctx.testDecision(profile);
+        client.send({ id, type: 'ack' });
         break;
       }
     }
