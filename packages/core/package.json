@@ -1,0 +1,31 @@
+{
+  "name": "@autopoker/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./adapters": {
+      "types": "./src/adapters/index.ts",
+      "default": "./src/adapters/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@autopoker/shared": "0.0.0",
+    "@hurdlegroup/robotjs": "^0.12.3",
+    "node-screenshots": "^0.2.8",
+    "pixelmatch": "^7.2.0",
+    "pngjs": "^7.0.0",
+    "uiohook-napi": "^1.5.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/pngjs": "^6.0.5"
+  }
+}

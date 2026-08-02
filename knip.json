@@ -1,0 +1,21 @@
+{
+  "ignoreExportsUsedInFile": true,
+  "workspaces": {
+    ".": {
+      "entry": [],
+      "project": []
+    },
+    "packages/shared": {
+      "project": "src/**/*.ts"
+    },
+    "packages/core": {
+      "project": "src/**/*.ts"
+    },
+    "apps/server": {
+      "project": "src/**/*.ts"
+    },
+    "apps/ui": {
+      "project": "src/**/*.{ts,tsx}"
+    }
+  }
+}
