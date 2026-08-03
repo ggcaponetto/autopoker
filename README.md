@@ -11,6 +11,14 @@ interval and drives the mouse/keyboard. It runs in one of two modes:
 Both modes share the same execution pipeline, so the safety machinery (dry-run, kill
 switch, cooldowns, serial action queue) applies identically.
 
+## Cheatsheet
+
+```powershell
+scrcpy --video-codec=h265 --max-size=1920 --max-fps=60 --no-audio --keyboard=uhid
+
+
+```
+
 ## Documentation
 
 Full documentation lives in [`docs/`](./docs) (a VitePress site) — a **user guide** and a
