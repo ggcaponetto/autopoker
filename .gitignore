@@ -8,3 +8,6 @@ data/
 *.log
 docs/.vitepress/dist/
 docs/.vitepress/cache/
+.vscode/
+# vendored reference checkout, not part of this project
+onyx/

@@ -60,6 +60,10 @@ export class FakeCapturer implements ScreenCapturer {
   async captureJpeg(): Promise<Uint8Array> {
     return new Uint8Array();
   }
+
+  async captureJpegRect(): Promise<Uint8Array> {
+    return new Uint8Array();
+  }
 }
 
 export type RecordedInput =

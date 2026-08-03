@@ -43,24 +43,24 @@ Adding a message means adding a variant to the relevant union and handling it in
 
 ## Server → Client
 
-| Message            | Purpose                                                                                                           |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| `hello`            | Sent on connect: server version + current engine state.                                                           |
-| `monitors`         | The monitor list (with per-monitor capture size and scale).                                                       |
-| `profiles`         | The full profile list.                                                                                            |
-| `strategies`       | The full strategy list.                                                                                           |
-| `engineState`      | Running/dry-run/profile/kill-switch state — broadcast on every transition.                                        |
-| `previewFrame`     | One JPEG frame for a subscribed monitor.                                                                          |
-| `baselineCaptured` | A captured baseline (id + PNG) in reply to `captureBaseline`.                                                     |
-| `attachmentSaved`  | Confirmation of an uploaded attachment.                                                                           |
-| `regionStatus`     | A region's live match/state, throttled to changes.                                                                |
-| `triggered`        | A region fired; carries the steps it would run.                                                                   |
-| `llmProbe`         | The result of a `probeLlm`.                                                                                       |
-| `llmDecision`      | A model decision: observation, reasoning, confidence, translated steps, whether executed, and why not if skipped. |
-| `killSwitch`       | The engine was halted by the hotkey or corner failsafe.                                                           |
-| `log`              | A human-readable log line (info/warn/error).                                                                      |
-| `error`            | An error, echoing the request `id` when there was one.                                                            |
-| `ack`              | Generic success acknowledgement.                                                                                  |
+| Message            | Purpose                                                                                                                                                                                                                      |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hello`            | Sent on connect: server version + current engine state.                                                                                                                                                                      |
+| `monitors`         | The monitor list (with per-monitor capture size and scale).                                                                                                                                                                  |
+| `profiles`         | The full profile list.                                                                                                                                                                                                       |
+| `strategies`       | The full strategy list.                                                                                                                                                                                                      |
+| `engineState`      | Running/dry-run/profile/kill-switch state — broadcast on every transition.                                                                                                                                                   |
+| `previewFrame`     | One JPEG frame for a subscribed monitor.                                                                                                                                                                                     |
+| `baselineCaptured` | A captured baseline (id + PNG) in reply to `captureBaseline`.                                                                                                                                                                |
+| `attachmentSaved`  | Confirmation of an uploaded attachment.                                                                                                                                                                                      |
+| `regionStatus`     | A region's live match/state, throttled to changes.                                                                                                                                                                           |
+| `triggered`        | A region fired; carries the steps it would run.                                                                                                                                                                              |
+| `llmProbe`         | The result of a `probeLlm`.                                                                                                                                                                                                  |
+| `llmDecision`      | A model decision: observation, reasoning, confidence, translated steps, whether executed, and why not if skipped. Also carries the sent screenshots (base64 JPEG per monitor) and capture-pixel click markers for debugging. |
+| `killSwitch`       | The engine was halted by the hotkey or corner failsafe.                                                                                                                                                                      |
+| `log`              | A human-readable log line (info/warn/error).                                                                                                                                                                                 |
+| `error`            | An error, echoing the request `id` when there was one.                                                                                                                                                                       |
+| `ack`              | Generic success acknowledgement.                                                                                                                                                                                             |
 
 ## Typical exchanges
 

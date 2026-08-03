@@ -1,4 +1,4 @@
-import type { ActionStep, Modifier, MouseButton, Point, Region } from '@autopoker/shared';
+import type { ActionStep, Modifier, MouseButton, Point, Rect, Region } from '@autopoker/shared';
 
 /** Raw RGBA image, 4 bytes per pixel, row-major, in capture (physical) pixels. */
 export interface Frame {
@@ -27,6 +27,8 @@ export interface ScreenCapturer {
   capture(monitorKey: string): Promise<Frame>;
   /** JPEG-encoded capture for UI previews. */
   captureJpeg(monitorKey: string): Promise<Uint8Array>;
+  /** JPEG-encoded crop (capture pixels) — what view regions send to the model. */
+  captureJpegRect(monitorKey: string, rect: Rect): Promise<Uint8Array>;
 }
 
 export interface InputController {

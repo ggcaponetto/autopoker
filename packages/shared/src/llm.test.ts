@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { createDefaultSettings, ProfileSchema, RegionSchema, type RegionInput } from './config';
 import {
   createDefaultLlmSettings,
+  LlmDecisionRecordSchema,
   LlmDecisionSchema,
+  LlmDecisionWireSchema,
   LlmSettingsSchema,
+  normalizeLlmDecision,
   StrategySchema,
 } from './llm';
 
@@ -23,6 +26,18 @@ describe('LlmSettingsSchema', () => {
 
   it('rejects unknown providers', () => {
     expect(() => LlmSettingsSchema.parse({ provider: 'skynet' })).toThrow();
+  });
+
+  it('defaults to sending every monitor and accepts an explicit selection', () => {
+    expect(createDefaultLlmSettings().monitorKeys).toBeNull();
+    expect(LlmSettingsSchema.parse({ monitorKeys: ['M@0,0'] }).monitorKeys).toEqual(['M@0,0']);
+    expect(LlmSettingsSchema.parse({ monitorKeys: [] }).monitorKeys).toEqual([]);
+  });
+
+  it('leaves thinking untouched by default and remembers a full round of decisions', () => {
+    const settings = createDefaultLlmSettings();
+    expect(settings.thinking).toBe('auto');
+    expect(settings.historySize).toBe(8);
   });
 });
 
@@ -134,5 +149,46 @@ describe('LlmDecisionSchema', () => {
     expect(() =>
       LlmDecisionSchema.parse({ ...base, confidence: 0.5, actions: [{ type: 'launchMissile' }] }),
     ).toThrow();
+  });
+});
+
+describe('LlmDecisionRecordSchema debug fields', () => {
+  it('defaults screenshots and markers to empty for older records', () => {
+    const record = LlmDecisionRecordSchema.parse({
+      at: 1,
+      decision: { observation: 'x', reasoning: 'y', confidence: 1, actions: [] },
+      steps: [],
+      executed: false,
+      latencyMs: 5,
+      model: 'test',
+    });
+    expect(record.screenshots).toEqual([]);
+    expect(record.markers).toEqual([]);
+  });
+});
+
+describe('LlmDecisionWireSchema + normalizeLlmDecision', () => {
+  const base = { observation: 'x', reasoning: 'y', actions: [] };
+
+  it('accepts percent-style confidence and normalizes it to 0..1', () => {
+    const wire = LlmDecisionWireSchema.parse({ ...base, confidence: 100 });
+    expect(normalizeLlmDecision(wire).confidence).toBe(1);
+    expect(
+      normalizeLlmDecision(LlmDecisionWireSchema.parse({ ...base, confidence: 82 })).confidence,
+    ).toBe(0.82);
+  });
+
+  it('leaves fractional confidence untouched', () => {
+    const wire = LlmDecisionWireSchema.parse({ ...base, confidence: 0.4 });
+    expect(normalizeLlmDecision(wire).confidence).toBe(0.4);
+  });
+
+  it('still rejects confidence beyond 100', () => {
+    expect(() => LlmDecisionWireSchema.parse({ ...base, confidence: 250 })).toThrow();
+  });
+
+  it('normalized decisions satisfy the strict schema', () => {
+    const wire = LlmDecisionWireSchema.parse({ ...base, confidence: 73 });
+    expect(() => LlmDecisionSchema.parse(normalizeLlmDecision(wire))).not.toThrow();
   });
 });

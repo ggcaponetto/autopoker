@@ -33,7 +33,10 @@ function makeRequest(overrides: Partial<DecisionRequest> = {}): DecisionRequest 
     },
     screenshots: [
       {
+        label: 'M@0,0',
         monitorKey: 'M@0,0',
+        originX: 0,
+        originY: 0,
         mediaType: 'image/jpeg',
         data: new Uint8Array([1, 2, 3]),
         captureWidth: 1920,
@@ -50,6 +53,7 @@ function makeRequest(overrides: Partial<DecisionRequest> = {}): DecisionRequest 
     ],
     history: [],
     triggeredRegionNames: [],
+    at: 60_000,
     ...overrides,
   };
 }
@@ -93,15 +97,61 @@ describe('buildMessages', () => {
     expect(textOf(makeRequest({ landmarks: [] }))).toContain('No landmarks are registered');
   });
 
-  it('includes history and the regions that woke the model', () => {
+  it('includes timestamped history and the regions that woke the model', () => {
     const text = textOf(
       makeRequest({
-        history: [{ at: 1, observation: 'my turn', actionSummary: 'clickRegion(Fold button)' }],
+        history: [
+          {
+            at: 15_000,
+            observation: 'my turn',
+            actionSummary: 'clickRegion(Fold button)',
+            executed: true,
+          },
+        ],
         triggeredRegionNames: ['Turn indicator'],
       }),
     );
-    expect(text).toContain('saw "my turn" -> did clickRegion(Fold button)');
+    expect(text).toContain('[45s ago] saw "my turn" -> clickRegion(Fold button)');
     expect(text).toContain('"Turn indicator"');
+  });
+
+  it('marks history entries that never ran so the model cannot mistake them for past actions', () => {
+    const text = textOf(
+      makeRequest({
+        history: [
+          {
+            at: 55_000,
+            observation: 'raise looked good',
+            actionSummary: 'clickRegion(Raise) — dry-run',
+            executed: false,
+          },
+        ],
+      }),
+    );
+    expect(text).toContain(
+      '[5s ago] saw "raise looked good" -> clickRegion(Raise) — dry-run (not executed)',
+    );
+  });
+
+  it('labels view crops and tells the model to answer in their coordinate space', () => {
+    const text = textOf(
+      makeRequest({
+        screenshots: [
+          {
+            label: 'Table',
+            monitorKey: 'M@0,0',
+            originX: 400,
+            originY: 200,
+            mediaType: 'image/jpeg',
+            data: new Uint8Array([1]),
+            captureWidth: 800,
+            captureHeight: 600,
+          },
+        ],
+      }),
+    );
+    expect(text).toContain('Screenshot "Table" (800x600 pixels)');
+    expect(text).toContain('set monitorKey to "Table"');
   });
 
   it('handles a missing strategy without throwing', () => {

@@ -45,6 +45,7 @@ Look at the **skipped reason** on the decision card or in the event log:
 - _"unknown region …"_ — the model named a landmark that doesn't exist. Fix the name in your strategy, or add the landmark.
 - _"above the cap of …"_ — the decision had too many actions. Raise `max actions`, or make the strategy propose fewer steps.
 - _"the model chose to wait"_ — working as intended; nothing to do.
+- _"the model returned an empty decision …"_ — usually **thinking: off** on a thinking-only model build (e.g. `qwen3-vl:32b`). Switch thinking back to _model default_, or pull an instruct build (`qwen3-vl:32b-instruct`). See [Model providers](./providers#local-models-with-ollama).
 
 ## LLM mode: it costs too much / calls the model too often
 

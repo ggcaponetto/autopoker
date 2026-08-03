@@ -36,7 +36,7 @@ flowchart LR
   prov -->|Vercel AI SDK| model[(Vision model)]
 ```
 
-- **`LlmDecider`** (in `core`) orchestrates: it builds the request, calls the source, translates the answer into engine actions, and enforces safety limits.
+- **`LlmDecider`** (in `core`) orchestrates: it builds the request, calls the source, translates the answer into engine actions, and enforces safety limits. Screenshot selection: enabled **view regions win** — each becomes a cropped screenshot (labelled with the region's name, carrying its capture-space origin) via `captureJpegRect`. With no views, whole monitors are sent per `llm.monitorKeys` (`null` = every monitor) — never inferred from regions or live frames, so a profile with no regions still sends images. Zero resulting screenshots logs a warning instead of silently sending a blind request. `clickPoint` coordinates may name a view (the model answers in crop space); `resolveCapturePoint` adds the view's origin back before the mapper converts to screen coordinates.
 - **`AiSdkDecisionSource`** (in `llm`) does the model call: assembles the prompt, resolves the provider, and validates the structured response.
 - **`MockDecisionSource`** returns scripted decisions with no model — used for tests and the UI's mock provider.
 
@@ -45,6 +45,8 @@ The server routes `mock` provider requests to the mock source and everything els
 ## Provider registry
 
 `resolveModel(settings)` builds a Vercel AI SDK `LanguageModel` for the configured provider — Ollama, Anthropic, OpenAI, Google, or an OpenAI-compatible endpoint. Providers are constructed **per call**, so a settings change takes effect without restarting the daemon. API keys are read from `process.env` (never from stored config) via the provider's default variable or a `apiKeyEnv` override.
+
+For Ollama, `llm.thinking: 'off'` passes `think: false` to the model — suppressing the reasoning trace of hybrid thinking models, usually the biggest latency lever on local hardware. The parameter is only sent when explicitly requested because some models reject it. Thinking-**only** builds (e.g. `qwen3-vl:32b`, an alias of the `-thinking` variant) respond to `think: false` with a schema-valid but empty decision; `AiSdkDecisionSource` detects that husk and raises an `invalid-output` error naming the thinking setting as the likely cause instead of surfacing a 0-confidence non-decision.
 
 Two capability predicates drive prompt assembly:
 
@@ -64,7 +66,9 @@ Attachments are turned into content parts by kind: images as file parts, text in
 
 ## Structured output
 
-The model is asked for a decision matching `LlmDecisionSchema` via the AI SDK's `generateText` with `Output.object({ schema })`. The schema is a **flat action shape** — a single object with optional fields, not a discriminated union — because small local vision models produce it far more reliably. Translating that flat shape into the strict engine `ActionStep` union happens in code, where a mismatch yields a clear message instead of a schema rejection.
+The model is asked for a decision matching `LlmDecisionWireSchema` via the AI SDK's `generateText` with `Output.object({ schema })`. The schema is a **flat action shape** — a single object with optional fields, not a discriminated union — because small local vision models produce it far more reliably. Translating that flat shape into the strict engine `ActionStep` union happens in code, where a mismatch yields a clear message instead of a schema rejection.
+
+The wire schema differs from the strict `LlmDecisionSchema` in two deliberate ways: **confidence accepts 0–100**, because local models routinely answer in percent no matter how they're prompted, and rejecting an otherwise-good decision over that wastes a whole vision call; and **observation/reasoning require at least one character**, so a degenerate empty answer fails loudly instead of passing as a 0-confidence decision. `normalizeLlmDecision()` (in `@autopoker/shared`) maps confidence above 1 back to a fraction before the decision leaves `AiSdkDecisionSource`, so everything downstream — safety gates, records, the UI — only ever sees 0–1.
 
 Errors are classified into `invalid-output` (the model returned something unparseable or schema-violating) versus `api` (a network/HTTP failure), so the decider can react appropriately.
 
@@ -90,11 +94,18 @@ Before returning any steps, `LlmDecider` applies, in order:
 3. **translation** — any unresolved action → rejected whole.
 4. **dry-run** — even a valid, confident, fully-translated decision produces a record marked "not executed" and returns nothing to the engine.
 
-Every outcome — executed or skipped, with the reason — is emitted as an `LlmDecisionRecord` so the UI can display and audit it. History (for continuity across turns) accumulates **only for decisions that actually executed**, so the model is never reminded of an action that didn't happen.
+Every outcome — executed or skipped, with the reason — is emitted as an `LlmDecisionRecord` so the UI can display and audit it. History accumulates for **every** decision — executed clicks, waits, and skipped plans alike — because the sequence of observations is the model's only memory of the current hand. Each entry carries an `executed` flag and the skip reason in its summary, and the prompt marks non-executed entries explicitly, so the model is never misled into treating a skipped plan as a past action. Entries are rendered with relative ages ("14s ago") against the request's `at` timestamp.
+
+Each record also carries two debug artifacts:
+
+- **`screenshots`** — the exact JPEGs that went into the prompt (base64, one per full monitor or view crop, each with a `label` and its capture-space origin), attached even when the model call failed, so "what did the model actually see?" is always answerable.
+- **`markers`** — where each click/move action would land, in the **pixel space of the sent screenshot** it belongs on (matched by `screenshotLabel`), so the UI can draw crosshairs directly on those images. Marker computation is deliberately best-effort and independent of translation: a below-confidence or rejected decision still gets markers, because that's exactly when you want to see the model's aim. An unresolvable action (unknown region name, no monitor) simply produces no marker.
+
+The UI keeps screenshots only on the newest record (they're large); markers are kept on all retained records.
 
 ## The probe
 
-`probeLlm(settings)` checks a provider without spending a generation. For Ollama it hits `/api/tags` and returns the installed model list (and whether the requested model is among them). For cloud providers it verifies configuration — chiefly that the API key resolves — with no network call. This powers the UI's **test connection** button.
+`probeLlm(settings)` checks a provider without spending a generation. For Ollama it hits `/api/tags` and returns the installed model list (and whether the requested model is among them). For cloud providers it verifies configuration — chiefly that the API key resolves — with no network call. This powers the UI's **test connection** button, and for Ollama the model panel fires it automatically (debounced 500 ms on provider/base-URL/model changes) to populate the model dropdown with the server's installed models. Probe results are stored in UI state for the status pill and dropdown but deliberately not logged as events — automatic probes would flood the log.
 
 ## Testing without a network
 

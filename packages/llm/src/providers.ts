@@ -31,7 +31,13 @@ function requireApiKey(settings: LlmSettings, fallbackEnv: string): string {
 export function resolveModel(settings: LlmSettings): LanguageModel {
   switch (settings.provider) {
     case 'ollama':
-      return createOllama({ baseURL: settings.baseUrl || DEFAULT_OLLAMA_BASE_URL })(settings.model);
+      return createOllama({ baseURL: settings.baseUrl || DEFAULT_OLLAMA_BASE_URL })(
+        settings.model,
+        // think:false suppresses the reasoning trace on thinking models (qwen3-vl,
+        // deepseek-r1) — usually the biggest latency lever on local models. Only sent
+        // when explicitly requested: some models reject the parameter outright.
+        settings.thinking === 'off' ? { think: false } : {},
+      );
     case 'anthropic':
       return createAnthropic({
         apiKey: requireApiKey(settings, 'ANTHROPIC_API_KEY'),

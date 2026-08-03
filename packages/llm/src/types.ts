@@ -17,9 +17,14 @@ export interface StrategyContext {
   attachments: LoadedAttachment[];
 }
 
-/** An encoded screenshot ready to send as a file part. */
+/** An encoded screenshot ready to send as a file part — a full monitor or a view crop. */
 export interface ScreenshotInput {
+  /** What the model should call this image: the monitor key, or the view region's name. */
+  label: string;
   monitorKey: string;
+  /** Top-left of this image in the monitor's capture space; (0,0) for a full screen. */
+  originX: number;
+  originY: number;
   mediaType: string;
   data: Uint8Array;
   captureWidth: number;
@@ -34,11 +39,18 @@ export interface Landmark {
   rect: Rect;
 }
 
-/** A previous decision, replayed so the model can stay coherent across turns. */
+/**
+ * A previous decision, replayed so the model can stay coherent across turns. Every
+ * decision is remembered — including waits and skipped ones — because for turn-based
+ * games the sequence of observations IS the game history.
+ */
 export interface HistoryEntry {
   at: number;
   observation: string;
+  /** What happened, e.g. 'clickRegion(Fold)' or 'wait' or 'clickPoint — skipped: …'. */
   actionSummary: string;
+  /** True only when the actions really ran on the machine. */
+  executed: boolean;
 }
 
 export interface DecisionRequest {
@@ -49,6 +61,8 @@ export interface DecisionRequest {
   history: HistoryEntry[];
   /** Names of regions whose condition fired this tick, when that is what woke the model. */
   triggeredRegionNames: string[];
+  /** When this request was assembled — the clock history entry ages are computed from. */
+  at: number;
   signal?: AbortSignal;
 }
 

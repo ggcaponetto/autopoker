@@ -40,6 +40,8 @@ The **test connection** button probes the configured provider without spending a
 - For **Ollama**, it checks the server is reachable and lists the models you actually have installed — and warns if the model you named isn't among them, with the exact `ollama pull` command to fix it.
 - For **cloud providers**, it verifies the configuration (chiefly that the API key is present) without a network call, so probing is free.
 
+With Ollama you rarely need the button: the panel **probes automatically** (debounced) whenever the provider, base URL, or model changes, and the **model field becomes a dropdown of the models installed on your server**. If your saved model isn't installed there, it's shown at the top marked _not installed_. When the server can't be reached, the field falls back to free text with generic suggestions.
+
 ## Local models with Ollama
 
 1. Install [Ollama](https://ollama.com).
@@ -47,6 +49,8 @@ The **test connection** button probes the configured provider without spending a
 3. In the model tab, select **Ollama**, set the model name, and hit **test connection** — it should report the model installed.
 
 The default base URL is `http://127.0.0.1:11434`. Override it in the **base URL** field if Ollama runs elsewhere.
+
+For **thinking models** (`qwen3-vl`, `deepseek-r1`-style), a **thinking** select appears in the model settings. Setting it to **off** suppresses the reasoning trace — a large latency win — but **only hybrid models support it**. Thinking-only builds break: `qwen3-vl:32b` (an alias of `qwen3-vl:32b-thinking`) answers with an empty decision when thinking is forced off, which autopoker reports as _"the model returned an empty decision"_. For speed with Qwen, pull the non-thinking build instead — `ollama pull qwen3-vl:32b-instruct` — and leave thinking on _model default_. See [Making it fast](./llm-mode#making-it-fast).
 
 ::: tip Local models need help
 Small local vision models are less precise than frontier cloud models. Lean on [landmarks](./llm-mode#landmarks-precision-without-trusting-the-model-s-aim) heavily, keep strategies short and explicit, and expect to raise `min confidence` cautiously. The **ask the model once** button is essential for seeing how a given local model actually behaves before trusting it.

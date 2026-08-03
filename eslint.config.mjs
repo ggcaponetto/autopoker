@@ -11,6 +11,7 @@ export default tseslint.config(
       'data/**',
       'coverage/**',
       'docs/.vitepress/cache/**',
+      'onyx/**',
     ],
   },
   js.configs.recommended,

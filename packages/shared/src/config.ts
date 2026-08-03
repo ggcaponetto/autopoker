@@ -37,8 +37,11 @@ export type RearmPolicy = z.infer<typeof RearmPolicySchema>;
 /**
  * 'automate' regions run their own action list when their condition fires (manual mode).
  * 'landmark' regions carry no actions: they exist so the LLM can click them by name.
+ * 'view' regions define which part of the screen is screenshotted for the LLM: when any
+ * exist, the model receives those crops instead of full monitors — far fewer pixels,
+ * far faster vision calls.
  */
-export const RegionPurposeSchema = z.enum(['automate', 'landmark']);
+export const RegionPurposeSchema = z.enum(['automate', 'landmark', 'view']);
 export type RegionPurpose = z.infer<typeof RegionPurposeSchema>;
 
 export const RegionSchema = z

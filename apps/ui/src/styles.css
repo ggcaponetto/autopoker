@@ -210,6 +210,23 @@ button.danger {
   border-color: #8a2f2f;
 }
 
+.spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #d8dce2;
+  border-top-color: transparent;
+  border-radius: 50%;
+  vertical-align: -1px;
+  animation: spinner-turn 0.8s linear infinite;
+}
+
+@keyframes spinner-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 input,
 select {
   background: #14161a;
@@ -530,6 +547,122 @@ input[type='color'] {
 .decision-actions code {
   font-size: 12px;
   color: #6fe08b;
+}
+
+.decision-shots {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.shot-thumb {
+  padding: 2px;
+  background: #12161c;
+  border-color: #3a4150;
+  line-height: 0;
+}
+
+.shot-thumb img {
+  max-height: 72px;
+  max-width: 160px;
+}
+
+.shot-wrap {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+}
+
+.shot-wrap img {
+  display: block;
+  max-width: 100%;
+}
+
+.shot-marker {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  border: 2px solid #ff4d5e;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px #12161c;
+  pointer-events: none;
+}
+
+.shot-marker::before,
+.shot-marker::after {
+  content: '';
+  position: absolute;
+  background: #ff4d5e;
+}
+
+.shot-marker::before {
+  left: 50%;
+  top: -8px;
+  bottom: -8px;
+  width: 2px;
+  transform: translateX(-50%);
+}
+
+.shot-marker::after {
+  top: 50%;
+  left: -8px;
+  right: -8px;
+  height: 2px;
+  transform: translateY(-50%);
+}
+
+.shot-marker-label {
+  position: absolute;
+  left: 14px;
+  top: 14px;
+  padding: 1px 5px;
+  background: #ff4d5e;
+  color: #12161c;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  border-radius: 3px;
+}
+
+/* Thumbnails: keep the crosshair visible but drop the label — no room for it. */
+.shot-thumb .shot-marker {
+  width: 10px;
+  height: 10px;
+}
+
+.shot-thumb .shot-marker-label {
+  display: none;
+}
+
+.shot-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgba(10, 12, 16, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.shot-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 95vw;
+  max-height: 92vh;
+  padding: 12px;
+  background: #1a2029;
+  border: 1px solid #3a4150;
+  border-radius: 6px;
+  overflow: auto;
+}
+
+.shot-modal-body .shot-wrap img {
+  max-width: 90vw;
+  max-height: 80vh;
 }
 
 input[type='file'] {

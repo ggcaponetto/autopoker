@@ -2,8 +2,10 @@ import {
   rectCenter,
   type ActionStep,
   type LlmAction,
+  type LlmClickMarker,
   type LlmDecision,
   type LlmDecisionRecord,
+  type LlmSentScreenshot,
   type Point,
   type Profile,
   type Region,
@@ -88,6 +90,18 @@ export class LlmDecider implements Decider {
       return [];
     }
 
+    // Kept on every record — including failures — so "what did the model actually
+    // see?" is always answerable from the UI.
+    const sentScreenshots: LlmSentScreenshot[] = request.screenshots.map((shot) => ({
+      label: shot.label,
+      monitorKey: shot.monitorKey,
+      originX: shot.originX,
+      originY: shot.originY,
+      jpegBase64: Buffer.from(shot.data).toString('base64'),
+      captureWidth: shot.captureWidth,
+      captureHeight: shot.captureHeight,
+    }));
+
     const startedAt = this.now();
     let decision: LlmDecision;
     let latencyMs: number;
@@ -107,6 +121,8 @@ export class LlmDecider implements Decider {
         steps: [],
         executed: false,
         skippedReason: 'model call failed',
+        screenshots: sentScreenshots,
+        markers: [],
         latencyMs: this.now() - startedAt,
         model: settings.model,
         usage: undefined,
@@ -138,17 +154,21 @@ export class LlmDecider implements Decider {
       steps,
       executed,
       skippedReason,
+      screenshots: sentScreenshots,
+      markers: this.markersFor(decision, profile, request),
       latencyMs,
       model,
       usage,
     });
 
     if (skippedReason) this.deps.onLog?.('info', `decision not executed: ${skippedReason}`);
-    // Nothing is returned in dry-run either: the engine would drop it, and remembering
-    // an action that never happened would mislead the model on the next turn.
+    // Every decision is remembered — waits and skips included — because the sequence
+    // of observations is the model's only memory of the current hand. Entries carry
+    // an honest executed flag so it never mistakes a skipped plan for a past action.
+    this.remember(decision, settings.historySize, executed, skippedReason);
+    // Nothing is returned to the engine in dry-run either: it would drop it anyway.
     if (!executed) return [];
 
-    this.remember(decision, settings.historySize);
     return [
       {
         regionId: 'llm',
@@ -160,42 +180,164 @@ export class LlmDecider implements Decider {
     ];
   }
 
-  private remember(decision: LlmDecision, historySize: number): void {
+  /**
+   * Where each click/move would land, drawn on the sent screenshots. Best-effort by
+   * design: computed even when the decision is later rejected or skipped, because
+   * that is exactly when you want to see the aim.
+   */
+  private markersFor(
+    decision: LlmDecision,
+    profile: Profile,
+    request: DecisionRequest,
+  ): LlmClickMarker[] {
+    const markers: LlmClickMarker[] = [];
+    // A monitor-space point lands on whichever sent screenshot contains it.
+    const place = (monitorKey: string, point: Point, label: string) => {
+      const shot = request.screenshots.find(
+        (candidate) =>
+          candidate.monitorKey === monitorKey &&
+          point.x >= candidate.originX &&
+          point.x < candidate.originX + candidate.captureWidth &&
+          point.y >= candidate.originY &&
+          point.y < candidate.originY + candidate.captureHeight,
+      );
+      if (!shot) return;
+      markers.push({
+        screenshotLabel: shot.label,
+        x: point.x - shot.originX,
+        y: point.y - shot.originY,
+        label,
+      });
+    };
+
+    decision.actions.forEach((action, index) => {
+      if (action.type === 'clickRegion' && action.regionName) {
+        const wanted = action.regionName.trim().toLowerCase();
+        const region = profile.regions.find(
+          (candidate) => candidate.name.trim().toLowerCase() === wanted,
+        );
+        if (!region) return;
+        place(region.monitorKey, rectCenter(region.rect), `${index + 1}. click "${region.name}"`);
+        return;
+      }
+      if (
+        (action.type === 'clickPoint' || action.type === 'moveMouse') &&
+        typeof action.x === 'number' &&
+        typeof action.y === 'number'
+      ) {
+        const verb = action.type === 'moveMouse' ? 'move to' : 'click';
+        const label = `${index + 1}. ${verb} (${Math.round(action.x)}, ${Math.round(action.y)})`;
+        const resolved = this.resolveCapturePoint(action, profile);
+        if (!isRejection(resolved)) {
+          place(resolved.monitorKey, resolved.point, label);
+        } else if (request.screenshots.length === 1) {
+          // Unresolvable but unambiguous: draw it on the only image the model saw.
+          const only = request.screenshots[0]!;
+          markers.push({
+            screenshotLabel: only.label,
+            x: Math.round(action.x),
+            y: Math.round(action.y),
+            label,
+          });
+        }
+      }
+    });
+    return markers;
+  }
+
+  private remember(
+    decision: LlmDecision,
+    historySize: number,
+    executed: boolean,
+    skippedReason: string | undefined,
+  ): void {
     if (historySize <= 0) return;
+    const base = summarize(decision.actions);
+    // Choosing to wait is not a failed action: it is exactly what happened.
+    const waited = base === 'wait' || base === 'nothing';
     this.history.push({
       at: this.now(),
       observation: decision.observation,
-      actionSummary: summarize(decision.actions),
+      actionSummary: executed || waited ? base : `${base} — ${skippedReason ?? 'skipped'}`,
+      executed: executed || waited,
     });
     while (this.history.length > historySize) this.history.shift();
+  }
+
+  /** Enabled regions whose purpose is to define what the model sees. */
+  private viewRegions(profile: Profile): Region[] {
+    return profile.regions.filter((region) => region.enabled && region.purpose === 'view');
   }
 
   private async buildRequest(profile: Profile, input: DeciderInput): Promise<DecisionRequest> {
     const settings = profile.settings.llm;
     const regions = profile.regions.filter((region) => region.enabled);
-    const monitorKeys = [...new Set(regions.map((region) => region.monitorKey))];
-    const keysToShoot = monitorKeys.length > 0 ? monitorKeys : [...input.frames.keys()];
-
     const monitors = await this.deps.capturer.listMonitors();
     const screenshots: ScreenshotInput[] = [];
-    for (const key of keysToShoot) {
-      const monitor = monitors.find((candidate) => candidate.key === key);
-      if (!monitor) continue;
-      screenshots.push({
-        monitorKey: key,
-        mediaType: 'image/jpeg',
-        data: await this.deps.capturer.captureJpeg(key),
-        captureWidth: monitor.captureWidth,
-        captureHeight: monitor.captureHeight,
-      });
+
+    // View regions win: sending only the interesting crop is the main latency lever,
+    // since vision cost scales with pixels. Without views, whole monitors are sent
+    // per the settings selection (null = every monitor) — never inferred from
+    // regions or live frames: a profile with no regions must still send something.
+    const views = this.viewRegions(profile);
+    if (views.length > 0) {
+      for (const view of views) {
+        if (!monitors.some((monitor) => monitor.key === view.monitorKey)) {
+          this.deps.onLog?.(
+            'warn',
+            `view "${view.name}" is on disconnected monitor "${view.monitorKey}"; skipping it`,
+          );
+          continue;
+        }
+        screenshots.push({
+          label: view.name,
+          monitorKey: view.monitorKey,
+          originX: view.rect.x,
+          originY: view.rect.y,
+          mediaType: 'image/jpeg',
+          data: await this.deps.capturer.captureJpegRect(view.monitorKey, view.rect),
+          captureWidth: view.rect.width,
+          captureHeight: view.rect.height,
+        });
+      }
+    } else {
+      const keysToShoot =
+        settings.monitorKeys === null
+          ? monitors.map((monitor) => monitor.key)
+          : [...new Set(settings.monitorKeys)];
+      for (const key of keysToShoot) {
+        const monitor = monitors.find((candidate) => candidate.key === key);
+        if (!monitor) {
+          this.deps.onLog?.('warn', `selected screen "${key}" is not connected; skipping it`);
+          continue;
+        }
+        screenshots.push({
+          label: key,
+          monitorKey: key,
+          originX: 0,
+          originY: 0,
+          mediaType: 'image/jpeg',
+          data: await this.deps.capturer.captureJpeg(key),
+          captureWidth: monitor.captureWidth,
+          captureHeight: monitor.captureHeight,
+        });
+      }
+    }
+    if (screenshots.length === 0) {
+      this.deps.onLog?.(
+        'warn',
+        'no screenshots will be sent — the model is blind; check the screens selection in the model tab',
+      );
     }
 
-    const landmarks: Landmark[] = regions.map((region) => ({
-      name: region.name,
-      description: region.description,
-      monitorKey: region.monitorKey,
-      rect: region.rect,
-    }));
+    const landmarks: Landmark[] = regions
+      .filter((region) => region.purpose !== 'view')
+      .map((region) => ({
+        name: region.name,
+        description: region.description,
+        monitorKey: region.monitorKey,
+        rect: region.rect,
+      }));
 
     const triggeredRegionNames = input.evaluations
       .filter((evaluation) => evaluation.triggered)
@@ -208,6 +350,7 @@ export class LlmDecider implements Decider {
       landmarks,
       history: [...this.history],
       triggeredRegionNames,
+      at: this.now(),
     };
   }
 
@@ -272,12 +415,40 @@ export class LlmDecider implements Decider {
   }
 
   private resolvePoint(action: LlmAction, profile: Profile): Point | Rejection {
+    const resolved = this.resolveCapturePoint(action, profile);
+    if (isRejection(resolved)) return resolved;
+    return this.toScreen(resolved.monitorKey, resolved.point);
+  }
+
+  /**
+   * Turn a clickPoint/moveMouse action into a monitor + capture-space point. The
+   * action's monitorKey may name a view region — the model gives coordinates within
+   * the crop it saw, and the view's offset translates them back to the monitor.
+   */
+  private resolveCapturePoint(
+    action: LlmAction,
+    profile: Profile,
+  ): { monitorKey: string; point: Point } | Rejection {
     if (typeof action.x !== 'number' || typeof action.y !== 'number') {
       return { reason: `${action.type} action had no coordinates` };
     }
-    const monitorKey = action.monitorKey ?? profile.regions[0]?.monitorKey;
-    if (!monitorKey) return { reason: `${action.type} action had no monitorKey` };
-    return this.toScreen(monitorKey, { x: Math.round(action.x), y: Math.round(action.y) });
+    const point = { x: Math.round(action.x), y: Math.round(action.y) };
+    const views = this.viewRegions(profile);
+    const inView = (view: Region) => ({
+      monitorKey: view.monitorKey,
+      point: { x: view.rect.x + point.x, y: view.rect.y + point.y },
+    });
+
+    if (action.monitorKey) {
+      const wanted = action.monitorKey.trim().toLowerCase();
+      const view = views.find((candidate) => candidate.name.trim().toLowerCase() === wanted);
+      return view ? inView(view) : { monitorKey: action.monitorKey, point };
+    }
+    // No key given: an unambiguous single view wins, then the first region's monitor.
+    if (views.length === 1) return inView(views[0]!);
+    const fallback = profile.regions[0]?.monitorKey;
+    if (!fallback) return { reason: `${action.type} action had no monitorKey` };
+    return { monitorKey: fallback, point };
   }
 
   private toScreen(monitorKey: string, point: Point): Point | Rejection {

@@ -28,6 +28,8 @@ export function App() {
   const [draft, setDraft] = useState<Region | null>(null);
   const [tab, setTab] = useState<Tab>('regions');
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
+  /** Request id of the in-flight "ask the model once" call, until its ack/error lands. */
+  const [askingId, setAskingId] = useState<string | null>(null);
 
   const profile = useMemo(
     () =>
@@ -43,6 +45,16 @@ export function App() {
       send({ type: 'subscribePreview', monitorKey: monitor.key, maxFps: 1 });
     }
   }, [state.connected, state.monitors, send]);
+
+  // Resolve the "ask the model once" spinner when its request completes or fails.
+  // A `hello` means a fresh connection, so any request from the old socket is dead.
+  useEffect(() => {
+    if (!askingId) return;
+    return subscribe((message) => {
+      const done = (message.type === 'ack' || message.type === 'error') && message.id === askingId;
+      if (done || message.type === 'hello') setAskingId(null);
+    });
+  }, [askingId, subscribe]);
 
   // Adopt freshly captured baselines into the open editor draft.
   useEffect(
@@ -229,12 +241,17 @@ export function App() {
                 <ModelPanel
                   settings={profile.settings}
                   strategies={state.strategies}
+                  monitors={state.monitors}
+                  regions={profile.regions}
                   probe={state.llmProbe}
                   lastDecision={state.decisions.at(-1) ?? null}
+                  asking={askingId !== null && state.connected}
                   onPatch={patchSettings}
                   onPatchLlm={patchLlm}
                   onProbe={() => send({ type: 'probeLlm', settings: profile.settings.llm })}
-                  onTestDecision={() => send({ type: 'testDecision', profileId: profile.id })}
+                  onTestDecision={() =>
+                    setAskingId(send({ type: 'testDecision', profileId: profile.id }))
+                  }
                 />
               ) : (
                 <p className="hint">Create a profile first.</p>

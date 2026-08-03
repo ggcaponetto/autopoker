@@ -18,7 +18,10 @@ function request(settings: Partial<LlmSettings> = {}): DecisionRequest {
     context: null,
     screenshots: [
       {
+        label: 'M@0,0',
         monitorKey: 'M@0,0',
+        originX: 0,
+        originY: 0,
         mediaType: 'image/jpeg',
         data: new Uint8Array([1]),
         captureWidth: 100,
@@ -35,6 +38,7 @@ function request(settings: Partial<LlmSettings> = {}): DecisionRequest {
     ],
     history: [],
     triggeredRegionNames: [],
+    at: 0,
   };
 }
 
@@ -90,11 +94,35 @@ describe('AiSdkDecisionSource', () => {
 
   it('classifies output that parses but violates the schema as invalid-output', async () => {
     const source = new AiSdkDecisionSource({
-      modelFactory: () => modelReturning(JSON.stringify({ ...validDecision, confidence: 7 })),
+      modelFactory: () => modelReturning(JSON.stringify({ ...validDecision, confidence: 'high' })),
     });
     await expect(source.decide(request())).rejects.toSatisfy(
       (error: unknown) => error instanceof LlmDecisionError && error.kind === 'invalid-output',
     );
+  });
+
+  it('names the likely cause when the model returns an empty decision husk', async () => {
+    const source = new AiSdkDecisionSource({
+      modelFactory: () =>
+        modelReturning(
+          JSON.stringify({ observation: '', reasoning: '', confidence: 0, actions: [] }),
+        ),
+    });
+    await expect(source.decide(request())).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof LlmDecisionError &&
+        error.kind === 'invalid-output' &&
+        error.message.includes('empty decision') &&
+        error.message.includes('thinking'),
+    );
+  });
+
+  it('accepts percent-style confidence and normalizes it to 0..1', async () => {
+    const source = new AiSdkDecisionSource({
+      modelFactory: () => modelReturning(JSON.stringify({ ...validDecision, confidence: 100 })),
+    });
+    const result = await source.decide(request());
+    expect(result.decision.confidence).toBe(1);
   });
 
   it('never sends temperature unless it is configured', async () => {

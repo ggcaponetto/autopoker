@@ -10,17 +10,18 @@ type PromptPart = { providerOptions?: Record<string, unknown> } & (
 
 export const SYSTEM_INSTRUCTIONS = `You are controlling a real computer by looking at screenshots of its screens.
 
-You will be given: a strategy document written by the user, optional reference material, a list of named clickable regions ("landmarks") the user registered, and one screenshot per monitor.
+You will be given: a strategy document written by the user, optional reference material, a list of named clickable regions ("landmarks") the user registered, a timestamped log of your own recent decisions, and one or more labelled screenshots (full monitors, or cropped views of the interesting area).
 
 Your job is to decide what to do NEXT, following the strategy exactly. Rules:
 
-- Base every decision on what is actually visible in the screenshot. Never assume state you cannot see.
+- Base every decision on what is actually visible in the screenshots. Never assume state you cannot see.
+- Use your decision log as the game history: it tells you what already happened this round. Entries marked "not executed" never happened on the machine — do not treat them as past actions.
 - Prefer clicking a landmark by name ("clickRegion" with regionName) over raw coordinates: landmark clicks are precise, coordinate clicks are not.
-- Only use "clickPoint" when no landmark covers the target. Coordinates are in screenshot pixels, with (0,0) at the TOP-LEFT of the monitor named by monitorKey.
+- Only use "clickPoint" when no landmark covers the target. Coordinates are pixels of ONE screenshot exactly as shown to you, with (0,0) at its TOP-LEFT; set "monitorKey" to that screenshot's label.
 - If it is not your turn to act, or the screen does not match anything the strategy covers, return a single {"type":"wait"} action. Waiting is always safe; guessing is not.
 - Keep the action list short — the minimum needed for this one step.
 - Set confidence honestly: below the configured threshold the action will not be executed.
-- "observation" describes what you see; "reasoning" explains the choice against the strategy.`;
+- "observation" describes what you see (include concrete game state — cards, stacks, bets — it becomes your memory for the next turns); "reasoning" explains the choice against the strategy.`;
 
 function attachmentIntro(loaded: LoadedAttachment): string {
   return `Reference material "${loaded.attachment.filename}" (${loaded.attachment.kind}):`;
@@ -74,12 +75,19 @@ function landmarkTable(request: DecisionRequest): string {
   return `Clickable landmarks (use these names with clickRegion):\n${rows.join('\n')}`;
 }
 
+function age(from: number, to: number): string {
+  const seconds = Math.max(0, Math.round((to - from) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  return `${Math.floor(seconds / 60)}m${seconds % 60 ? ` ${seconds % 60}s` : ''} ago`;
+}
+
 function historyBlock(request: DecisionRequest): string | null {
   if (request.history.length === 0) return null;
-  const rows = request.history.map(
-    (entry, index) => `${index + 1}. saw "${entry.observation}" -> did ${entry.actionSummary}`,
-  );
-  return `Your recent decisions (oldest first). Do not repeat an action that already took effect:\n${rows.join('\n')}`;
+  const rows = request.history.map((entry) => {
+    const outcome = entry.executed ? entry.actionSummary : `${entry.actionSummary} (not executed)`;
+    return `- [${age(entry.at, request.at)}] saw "${entry.observation}" -> ${outcome}`;
+  });
+  return `Your recent decisions, oldest first — this is the game history so far. Do not repeat an action that already took effect:\n${rows.join('\n')}`;
 }
 
 export interface BuildPromptOptions {
@@ -135,9 +143,12 @@ export function buildMessages(
   }
 
   for (const shot of request.screenshots) {
+    const isCrop = shot.label !== shot.monitorKey;
     volatileParts.push({
       type: 'text',
-      text: `Screenshot of monitor ${shot.monitorKey} (${shot.captureWidth}x${shot.captureHeight} pixels):`,
+      text: isCrop
+        ? `Screenshot "${shot.label}" (${shot.captureWidth}x${shot.captureHeight} pixels) — a cropped view of the relevant screen area, captured just now. For clickPoint, give coordinates within THIS image and set monitorKey to "${shot.label}":`
+        : `Screenshot "${shot.monitorKey}" (${shot.captureWidth}x${shot.captureHeight} pixels), captured just now:`,
     });
     volatileParts.push({ type: 'file', mediaType: shot.mediaType, data: shot.data });
   }

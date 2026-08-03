@@ -218,8 +218,18 @@ export function RegionEditor({
         >
           <option value="automate">automate — runs its own actions when triggered</option>
           <option value="landmark">landmark — a target the model can click by name</option>
+          <option value="view">
+            view — this area is what the model sees (faster than full screens)
+          </option>
         </select>
       </label>
+      {region.purpose === 'view' && (
+        <p className="hint">
+          While any view region is enabled, the model receives only these crops instead of full
+          monitors — draw it around just the game window. Fewer pixels means much faster model
+          calls. The condition below still runs and can trigger the model like any region.
+        </p>
+      )}
       <label className="field grow">
         <span>description</span>
         <input
@@ -323,10 +333,12 @@ export function RegionEditor({
 
       <fieldset>
         <legend>actions</legend>
-        {region.purpose === 'landmark' && (
+        {region.purpose !== 'automate' && (
           <p className="hint">
-            Landmarks need no actions — the model decides when to click them. Any actions below are
-            kept but ignored while this region is a landmark.
+            {region.purpose === 'landmark'
+              ? 'Landmarks need no actions — the model decides when to click them.'
+              : 'View regions need no actions — they only define what the model sees.'}{' '}
+            Any actions below are kept but ignored while this purpose is selected.
           </p>
         )}
         {region.actions.map((step, index) => (

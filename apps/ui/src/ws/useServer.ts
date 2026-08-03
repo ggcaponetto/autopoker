@@ -107,16 +107,9 @@ function reducer(state: ServerConnectionState, action: InternalAction): ServerCo
         case 'attachmentSaved':
           return state; // the follow-up `strategies` broadcast carries the new list
         case 'llmProbe':
-          return {
-            ...state,
-            llmProbe: message.result,
-            events: pushEvent(state.events, {
-              at: Date.now(),
-              kind: 'log',
-              level: message.result.ok ? 'info' : 'warn',
-              text: message.result.message,
-            }),
-          };
+          // Stored, not logged: probes fire automatically for Ollama now, and an
+          // event per probe would flood the log. The model panel's pill shows it.
+          return { ...state, llmProbe: message.result };
         case 'llmDecision': {
           const { record } = message;
           const verdict = record.executed
@@ -124,7 +117,16 @@ function reducer(state: ServerConnectionState, action: InternalAction): ServerCo
             : `skipped (${record.skippedReason ?? 'no reason given'})`;
           return {
             ...state,
-            decisions: [...state.decisions.slice(-49), record],
+            // Only the newest decision keeps its screenshots: they are large, and the
+            // decision card only ever shows the latest record.
+            decisions: [
+              ...state.decisions
+                .slice(-49)
+                .map((entry) =>
+                  entry.screenshots.length > 0 ? { ...entry, screenshots: [] } : entry,
+                ),
+              record,
+            ],
             events: pushEvent(state.events, {
               at: record.at,
               kind: 'decision',
@@ -223,14 +225,17 @@ export function useServer(url = 'ws://localhost:8787') {
   const nextIdRef = useRef(0);
   const listenersRef = useRef(new Set<(message: ServerMessage) => void>());
 
-  const send = useCallback((message: ClientMessage) => {
+  /** Sends a message and returns its request id (for matching the ack), or null if dropped. */
+  const send = useCallback((message: ClientMessage): string | null => {
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
       console.warn('autopoker: dropped message, socket not open:', message.type);
-      return;
+      return null;
     }
     nextIdRef.current += 1;
-    socket.send(encodeMessage({ ...message, id: `c${nextIdRef.current}` }));
+    const id = `c${nextIdRef.current}`;
+    socket.send(encodeMessage({ ...message, id }));
+    return id;
   }, []);
 
   /** Subscribe to raw server messages (for one-shot flows like baseline capture). */

@@ -17,6 +17,18 @@ export const LlmSettingsSchema = z.object({
   model: z.string().min(1).default('llama3.2-vision'),
   /** Overrides the provider's default endpoint; required for openai-compatible. */
   baseUrl: z.string().optional(),
+  /**
+   * Monitor keys whose screenshots are sent to the model. `null` (the default)
+   * means every monitor; an empty array sends none, leaving the model blind.
+   * Ignored while any enabled 'view' region exists — views send crops instead.
+   */
+  monitorKeys: z.array(z.string()).nullable().default(null),
+  /**
+   * 'off' disables the model's reasoning trace (Ollama thinking models such as
+   * qwen3-vl / deepseek-r1) — usually the single biggest latency cut on local
+   * models. 'auto' leaves the model's default behaviour untouched.
+   */
+  thinking: z.enum(['auto', 'off']).default('auto'),
   /** Name of the environment variable holding the API key. Keys are never stored in profiles. */
   apiKeyEnv: z.string().optional(),
   maxOutputTokens: z.number().int().min(256).max(32_000).default(2_000),
@@ -31,8 +43,12 @@ export const LlmSettingsSchema = z.object({
   /** Decisions below this confidence are logged but never executed. */
   minConfidence: z.number().min(0).max(1).default(0.5),
   maxActionsPerDecision: z.number().int().min(1).max(20).default(4),
-  /** How many past decisions to replay to the model for continuity. */
-  historySize: z.number().int().min(0).max(20).default(3),
+  /**
+   * How many past decisions (including waits and skips) to replay to the model.
+   * This is the model's only memory of the current hand, so for turn-based games
+   * it should comfortably cover one full round of action.
+   */
+  historySize: z.number().int().min(0).max(50).default(8),
 });
 export type LlmSettings = z.infer<typeof LlmSettingsSchema>;
 export type LlmSettingsInput = z.input<typeof LlmSettingsSchema>;
@@ -99,6 +115,58 @@ export const LlmDecisionSchema = z.object({
 });
 export type LlmDecision = z.infer<typeof LlmDecisionSchema>;
 
+/**
+ * The decision as the model is allowed to answer it. Local vision models routinely
+ * report confidence as a percentage despite being asked for 0..1, so the wire schema
+ * accepts 0..100 and normalizeLlmDecision() maps it back before anything else sees it.
+ */
+export const LlmDecisionWireSchema = LlmDecisionSchema.extend({
+  // min(1) reaches providers that enforce the schema as a generation grammar
+  // (Ollama structured outputs), pushing degenerate empty answers off the table.
+  observation: z.string().min(1).describe('What you see on screen. Never empty.'),
+  reasoning: z.string().min(1).describe('Why, against the strategy. Never empty.'),
+  confidence: z
+    .number()
+    .min(0)
+    .max(100)
+    .describe('How sure you are, from 0 to 1. Values above 1 are read as percentages.'),
+});
+export type LlmDecisionWire = z.infer<typeof LlmDecisionWireSchema>;
+
+/** Collapse a wire decision to the strict shape: percent confidences become fractions. */
+export function normalizeLlmDecision(wire: LlmDecisionWire): LlmDecision {
+  const confidence = wire.confidence > 1 ? wire.confidence / 100 : wire.confidence;
+  return { ...wire, confidence: Math.min(1, Math.max(0, confidence)) };
+}
+
+/** One screenshot exactly as it was sent to the model, kept for debugging. */
+export const LlmSentScreenshotSchema = z.object({
+  /** What the model knows this image as: the monitor key, or a view region's name. */
+  label: z.string(),
+  monitorKey: z.string(),
+  /** Top-left of this image in the monitor's capture space; (0,0) for full screens. */
+  originX: z.number().default(0),
+  originY: z.number().default(0),
+  jpegBase64: z.string(),
+  captureWidth: z.number().int(),
+  captureHeight: z.number().int(),
+});
+export type LlmSentScreenshot = z.infer<typeof LlmSentScreenshotSchema>;
+
+/**
+ * Where a decision's action would land, in pixels of one sent screenshot (matched by
+ * label). Best-effort debug info: computed even for decisions that were never executed.
+ */
+export const LlmClickMarkerSchema = z.object({
+  /** Label of the sent screenshot this marker belongs on. */
+  screenshotLabel: z.string(),
+  x: z.number(),
+  y: z.number(),
+  /** e.g. '1. click "Fold button"' — numbered in action order. */
+  label: z.string(),
+});
+export type LlmClickMarker = z.infer<typeof LlmClickMarkerSchema>;
+
 /** A decision plus everything the UI needs to display and audit it. */
 export const LlmDecisionRecordSchema = z.object({
   at: z.number(),
@@ -108,6 +176,10 @@ export const LlmDecisionRecordSchema = z.object({
   executed: z.boolean(),
   /** Why the decision was not executed (dry-run, low confidence, unresolved region...). */
   skippedReason: z.string().optional(),
+  /** The exact images the model saw, so a bad decision can be diagnosed visually. */
+  screenshots: z.array(LlmSentScreenshotSchema).default([]),
+  /** Where the decision's clicks/moves would land on those images. */
+  markers: z.array(LlmClickMarkerSchema).default([]),
   latencyMs: z.number(),
   model: z.string(),
   usage: z

@@ -10,12 +10,13 @@ Create profiles for different tasks or different windows. Switching profiles fro
 
 A **region** is a rectangle you draw on a monitor preview, plus what it means. Every region has a **purpose** that decides how the engine treats it:
 
-| Purpose      | Meaning                                                                                                                       |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| **automate** | The region runs its own list of actions when its condition fires. This is manual-mode automation.                             |
-| **landmark** | The region carries no actions. It exists so an LLM can click it _by name_. This is what makes [LLM mode](./llm-mode) precise. |
+| Purpose      | Meaning                                                                                                                                                             |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **automate** | The region runs its own list of actions when its condition fires. This is manual-mode automation.                                                                   |
+| **landmark** | The region carries no actions. It exists so an LLM can click it _by name_. This is what makes [LLM mode](./llm-mode) precise.                                       |
+| **view**     | The region defines _what the model sees_: while any view is enabled, only these crops are sent instead of full monitors — far fewer pixels, far faster model calls. |
 
-A single profile can mix both. A common LLM setup is one `automate` region acting as a cheap "it's my turn" trigger, plus several `landmark` regions for the buttons the model might click.
+A single profile can mix all three. A well-tuned LLM setup is one `view` region drawn around the game window, one `automate`-style trigger region acting as a cheap "it's my turn" detector, plus several `landmark` regions for the buttons the model might click.
 
 ## The region editor
 
@@ -23,7 +24,7 @@ Selecting a region (or drawing a new one) opens the editor. The fields, top to b
 
 - **name** — how you and the model refer to it. In LLM mode the model clicks a landmark by this name, matched case- and whitespace-insensitively.
 - **enabled** — disabled regions are ignored by the engine entirely.
-- **purpose** — automate or landmark, as above.
+- **purpose** — automate, landmark, or view, as above.
 - **description** — a plain-English hint sent to the model (e.g. _"the fold button, bottom left of the table"_). Only used in LLM mode, but harmless otherwise.
 - **condition** — what makes this region "match" (see below).
 - **actions** — for automate regions, the steps to run when it triggers (see below).

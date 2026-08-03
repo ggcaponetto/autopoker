@@ -118,4 +118,24 @@ describe('useServer under StrictMode', () => {
     expect(result.current.state.monitors[0]!.key).toBe('M@0,0');
     expect(seen).toContain('monitors');
   });
+
+  it('stores probe results without flooding the event log', async () => {
+    const { result } = renderHook(() => useServer('ws://test'), { wrapper: StrictMode });
+    await act(async () => {});
+    const live = FakeWebSocket.instances[1]!;
+    await act(async () => {
+      live.open();
+      live.receive({
+        type: 'llmProbe',
+        result: {
+          ok: true,
+          provider: 'ollama',
+          message: 'Ollama is reachable and "m" is installed',
+          models: ['m', 'qwen3-vl:30b-a3b'],
+        },
+      });
+    });
+    expect(result.current.state.llmProbe?.models).toContain('qwen3-vl:30b-a3b');
+    expect(result.current.state.events).toHaveLength(0);
+  });
 });
