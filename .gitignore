@@ -6,3 +6,5 @@ data/
 *.tsbuildinfo
 .eslintcache
 *.log
+docs/.vitepress/dist/
+docs/.vitepress/cache/

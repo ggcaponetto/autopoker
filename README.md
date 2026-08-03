@@ -11,6 +11,15 @@ interval and drives the mouse/keyboard. It runs in one of two modes:
 Both modes share the same execution pipeline, so the safety machinery (dry-run, kill
 switch, cooldowns, serial action queue) applies identically.
 
+## Documentation
+
+Full documentation lives in [`docs/`](./docs) (a VitePress site) — a **user guide** and a
+**developer guide**. Run it locally with `npm run docs:dev`, or build the static site with
+`npm run docs:build`. This README is a quick orientation; the docs are the depth.
+
+- **New here?** [`docs/guide/getting-started`](./docs/guide/getting-started.md)
+- **How it works?** [`docs/dev/`](./docs/dev/index.md)
+
 ## Quick start
 
 ```
@@ -20,6 +29,7 @@ npm run dev
 
 - server: `ws://localhost:8787` (dry-run by default)
 - UI: `http://localhost:5173`
+- docs: `npm run docs:dev` → `http://localhost:5174`
 
 Workflow: create a profile → drag a rectangle over a live monitor preview → pick a
 condition (color at point · region average color · looks-like-baseline ·

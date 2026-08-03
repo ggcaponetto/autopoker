@@ -4,3 +4,5 @@ coverage/
 data/
 package-lock.json
 CLAUDE.md
+docs/.vitepress/dist/
+docs/.vitepress/cache/

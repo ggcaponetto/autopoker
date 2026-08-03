@@ -19,6 +19,11 @@
     },
     "apps/ui": {
       "project": "src/**/*.{ts,tsx}"
+    },
+    "docs": {
+      "entry": [".vitepress/config.ts"],
+      "project": ".vitepress/**/*.ts",
+      "ignoreDependencies": ["mermaid"]
     }
   }
 }
